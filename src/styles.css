@@ -181,6 +181,20 @@ input:focus {
   color: #6ef8de; /* Updated neon green text */
 }
 
+option {
+  background-color: #000000; /* Pure black background */
+  color: #6ef8de; /* Updated neon green text */
+  padding: 0.5vh;
+  border-radius: 0.2vw; /* Reduced border radius */
+}
+
+option:hover {
+  outline: none;
+  background-color: #6ef8de; /* Slightly less black background */
+  color: #000000; /* Updated neon green text */
+  cursor: pointer;
+}
+
 /* Stats frame */
 .stats-frame {
   background-color: #000000; /* Pure black background */
