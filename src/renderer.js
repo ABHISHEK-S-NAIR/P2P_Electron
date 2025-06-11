@@ -1,5 +1,5 @@
-const { ipcRenderer } = require('electron');
-const { NetworkManager } = require('./network-manager');
+// const { ipcRenderer } = require('electron'); // This is not needed with contextBridge
+// const { NetworkManager } = require('./network-manager'); // This is not needed with contextBridge
 
 // UI Elements
 const messageDisplay = document.getElementById('message-display');
@@ -9,6 +9,19 @@ const nicknameEntry = document.getElementById('nickname-entry');
 const startBtn = document.getElementById('start-btn');
 const peersListbox = document.getElementById('peers-listbox');
 const eduText = document.getElementById('edu-text');
+
+// Window control button event listeners
+document.getElementById("min-btn").addEventListener("click", () => {
+  window.electronAPI.minimize();
+});
+
+document.getElementById("max-btn").addEventListener("click", () => {
+  window.electronAPI.maximize();
+});
+
+document.getElementById("close-btn").addEventListener("click", () => {
+  window.electronAPI.close();
+});
 
 // Statistics labels
 const statsLabels = {
@@ -22,8 +35,7 @@ const statsLabels = {
   'Session Duration': document.getElementById('session-duration-label')
 };
 
-// Network manager instance
-let networkManager = null;
+// No longer need a global networkManager instance here
 
 // Event listeners
 messageEntry.addEventListener('keypress', (event) => {
@@ -68,26 +80,17 @@ Enter your agent alias and click 'Start' to join the P2P network!`;
   eduText.textContent = content;
 }
 
-// Start P2P networking
-function startP2P() {
+// Start P2P networking by calling the main process
+async function startP2P() {
   const nickname = nicknameEntry.value.trim();
   if (!nickname) {
     displaySystemMessage('Error: Please enter a nickname');
     return;
   }
+  
+  const success = await window.electronAPI.startP2P(nickname);
 
-  // Initialize network manager with nickname
-  networkManager = new NetworkManager(nickname);
-
-  // Set callbacks for UI updates
-  networkManager.setCallbacks({
-    onMessageReceived: displayMessage,
-    onPeersUpdated: updatePeersList,
-    onSystemLog: displaySystemMessage
-  });
-
-  // Start networking
-  if (networkManager.startNetworking()) {
+  if (success) {
     // Disable nickname entry and start button
     nicknameEntry.disabled = true;
     startBtn.disabled = true;
@@ -98,41 +101,40 @@ function startP2P() {
 
     // Start statistics update
     startStatisticsUpdate();
-
-    // Start checking for inactive peers
-    startInactivePeersCheck();
   } else {
     displaySystemMessage('Error: Failed to start P2P networking');
   }
 }
 
-// Send message to selected peers
+// Send message to selected peers via the main process
 function sendMessage() {
-  if (!networkManager) {
+  // Check if networking has started by checking if the start button is disabled
+  if (startBtn.disabled) {
+    const message = messageEntry.value.trim();
+    if (message) {
+      // Get all peer IPs from the listbox
+      const allOptions = Array.from(peersListbox.options);
+      const allPeers = allOptions.map(option => {
+        const peerEntry = option.text;
+        const ipStart = peerEntry.lastIndexOf('(') + 1;
+        const ipEnd = peerEntry.lastIndexOf(')');
+        if (ipStart > 0 && ipEnd > ipStart) {
+          return peerEntry.substring(ipStart, ipEnd);
+        }
+        return null;
+      }).filter(ip => ip !== null);
+
+      // Send message to all peers via main process
+      window.electronAPI.sendMessage({ selectedPeers: allPeers, message });
+
+      // Display our own message immediately
+      displayMessage(new Date().toLocaleTimeString(), 'You', 'local', message);
+
+      // Clear message entry
+      messageEntry.value = '';
+    }
+  } else {
     displaySystemMessage('Please start the chat first!');
-    return;
-  }
-
-  const message = messageEntry.value.trim();
-  if (message) {
-    // Get all peer IPs
-    const allOptions = Array.from(peersListbox.options);
-    const allPeers = allOptions.map(option => {
-      // Extract IP from format "Nickname (IP)"
-      const peerEntry = option.text;
-      const ipStart = peerEntry.lastIndexOf('(') + 1;
-      const ipEnd = peerEntry.lastIndexOf(')');
-      if (ipStart > 0 && ipEnd > ipStart) {
-        return peerEntry.substring(ipStart, ipEnd);
-      }
-      return null;
-    }).filter(ip => ip !== null);
-
-    // Send message to all peers
-    networkManager.sendMessageToSelectedPeers(allPeers, message);
-
-    // Clear message entry
-    messageEntry.value = '';
   }
 }
 
@@ -215,43 +217,35 @@ function displaySystemMessage(message) {
   messageDisplay.scrollTop = messageDisplay.scrollHeight;
 }
 
-// Update statistics in the UI
+// Update statistics in the UI by fetching from the main process
 function startStatisticsUpdate() {
-  setInterval(() => {
-    if (networkManager) {
-      const stats = networkManager.getStats();
-
-      // Update statistics labels
-      statsLabels['Status'].textContent = stats.status;
-      statsLabels['Local IP'].textContent = stats.localIp;
-      statsLabels['UDP Port'].textContent = stats.udpPort;
-      statsLabels['TCP Port'].textContent = stats.tcpPort;
-      statsLabels['Messages Sent'].textContent = stats.messagesSent;
-      statsLabels['Messages Received'].textContent = stats.messagesReceived;
-      statsLabels['Peers Discovered'].textContent = stats.peersDiscovered;
-      statsLabels['Session Duration'].textContent = stats.sessionDuration;
+  setInterval(async () => {
+    if (startBtn.disabled) {
+      const stats = await window.electronAPI.getStats();
+      if (stats) {
+        statsLabels['Status'].textContent = stats.status;
+        statsLabels['Local IP'].textContent = stats.localIp;
+        statsLabels['UDP Port'].textContent = stats.udpPort;
+        statsLabels['TCP Port'].textContent = stats.tcpPort;
+        statsLabels['Messages Sent'].textContent = stats.messagesSent;
+        statsLabels['Messages Received'].textContent = stats.messagesReceived;
+        statsLabels['Peers Discovered'].textContent = stats.peersDiscovered;
+        statsLabels['Session Duration'].textContent = stats.sessionDuration;
+      }
     }
   }, 1000);
 }
 
-// Check for inactive peers
-function startInactivePeersCheck() {
-  networkManager.inactivePeersInterval = setInterval(() => {
-    if (networkManager) {
-      networkManager.checkInactivePeers();
-    }
-  }, 10000); // Check every 10 seconds
-}
+// This function is no longer needed as the logic is in main.js
+// function startInactivePeersCheck() { ... }
 
-// Handle window close
-window.addEventListener('beforeunload', () => {
-  if (networkManager) {
-    networkManager.cleanup();
-  }
-});
-
-// Initialize app
+// Initialize app and set up listeners for events from the main process
 function initialize() {
+  // Set up listeners
+  window.electronAPI.onMessageReceived(displayMessage);
+  window.electronAPI.onPeersUpdated(updatePeersList);
+  window.electronAPI.onSystemLog(displaySystemMessage);
+
   // Display welcome message
   displaySystemMessage('You have joined P2P_EchoVoid');
   displaySystemMessage('Enter your agent alias and click \'Start\' to join the P2P network.');
@@ -260,5 +254,5 @@ function initialize() {
   initializeEducationalContent();
 }
 
-// Initialize when DOM is loaded
+// Initialize the app when the DOM is ready
 document.addEventListener('DOMContentLoaded', initialize);

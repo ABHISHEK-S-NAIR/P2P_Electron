@@ -5,9 +5,9 @@ const { exec } = require('child_process');
 const ip = require('ip');
 
 class NetworkManager {
-  constructor(nickname) {
+  constructor() {
     // User identification
-    this.nickname = nickname;
+    this.nickname = 'Unknown';
     
     // Initialize network variables
     this.udpSocket = null;
@@ -72,7 +72,8 @@ class NetworkManager {
       
       return '127.0.0.1'; // Fallback to localhost if no suitable IP found
     } catch (error) {
-      console.error('Error getting WiFi IP:', error);
+      // In a production build, we don't want to log this to the console.
+      // We'll just return the fallback IP.
       return '127.0.0.1';
     }
   }
@@ -253,7 +254,7 @@ class NetworkManager {
     });
   }
   
-  sendMessageToPeer(peerIp, message, index) {
+  sendMessageToPeer(peerIp, message) {
     if (!this.peers[peerIp]) {
       this.logMessage(`Unknown peer: ${peerIp}`);
       return false;
@@ -284,13 +285,6 @@ class NetworkManager {
         this.bytesSent += messageBytes.length;
         this.messagesSent += 1;
         
-        // Display in our own chat
-        if (this.onMessageReceived) {
-          if(index===1){
-            this.onMessageReceived(timestamp, 'You', peerIp, message);
-          }
-        }
-        
         // Close connection
         client.end();
       });
@@ -315,12 +309,10 @@ class NetworkManager {
     
     // Send to each selected peer
     let successCount = 0;
-    let index=1;
     for (const peerIp of selectedPeers) {
-      if (this.sendMessageToPeer(peerIp, message,index)) {
+      if (this.sendMessageToPeer(peerIp, message)) {
         successCount += 1;
       }
-      index+=1;
     }
     
     if (successCount > 0) {
